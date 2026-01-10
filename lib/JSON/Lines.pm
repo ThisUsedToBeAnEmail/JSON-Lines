@@ -1,10 +1,10 @@
 package JSON::Lines;
-use 5.006; use strict; use warnings; our $VERSION = '1.08';
-use JSON; use base 'Import::Export';
+use 5.006; use strict; use warnings; our $VERSION = '1.10';
+use Cpanel::JSON::XS; use base 'Import::Export';
 
 our ($JSON, $LINES, %EX);
 BEGIN {
-	$JSON = JSON->new;
+	$JSON = Cpanel::JSON::XS->new;
 	$LINES = qr{ ([\[\{] (?: (?> [^\[\]\{\}]+ ) | (??{ $LINES }) )* [\]\}]) }x;
 	%EX = (
 		jsonl => [qw/all/]
@@ -30,6 +30,48 @@ sub new {
 	exists $args{$_} && $JSON->$_($args{$_}) for qw/pretty canonical utf8/;
 	$self->{$_} = $args{$_} for qw/parse_headers error_cb success_cb/;
 	$self;
+}
+
+sub pretty {
+	my ($self, $val) = @_;
+	return $JSON->get_indent if @_ == 1;
+	$JSON->pretty($val);
+	return $self;
+}
+
+sub canonical {
+	my ($self, $val) = @_;
+	return $JSON->get_canonical if @_ == 1;
+	$JSON->canonical($val);
+	return $self;
+}
+
+sub utf8 {
+	my ($self, $val) = @_;
+	return $JSON->get_utf8 if @_ == 1;
+	$JSON->utf8($val);
+	return $self;
+}
+
+sub parse_headers {
+	my ($self, $val) = @_;
+	return $self->{parse_headers} if @_ == 1;
+	$self->{parse_headers} = $val;
+	return $self;
+}
+
+sub error_cb {
+	my ($self, $val) = @_;
+	return $self->{error_cb} if @_ == 1;
+	$self->{error_cb} = $val;
+	return $self;
+}
+
+sub success_cb {
+	my ($self, $val) = @_;
+	return $self->{success_cb} if @_ == 1;
+	$self->{success_cb} = $val;
+	return $self;
 }
 
 sub encode {
@@ -114,6 +156,95 @@ sub get_line {
 	return $self->_decode_line($line);
 }
 
+sub get_line_at {
+	my ($self, $fh, $index, $seek) = @_;
+	my $fh_id = fileno($fh);
+	$self->{_line_pos} //= {};
+	if ($seek) {
+		seek $fh, 0, 0;
+		$self->{_line_pos}{$fh_id} = 0;
+	}
+	$self->{_line_pos}{$fh_id} //= 0;
+	if ($index < $self->{_line_pos}{$fh_id}) {
+		seek $fh, 0, 0;
+		$self->{_line_pos}{$fh_id} = 0;
+	}
+	while ($self->{_line_pos}{$fh_id} < $index && !eof($fh)) {
+		<$fh>;
+		$self->{_line_pos}{$fh_id}++;
+	}
+	return undef if eof($fh);
+	my $line = '';
+	while ($line !~ m/^$LINES/ && !eof($fh)) {
+		$line .= <$fh>;
+		$self->{_line_pos}{$fh_id}++;
+	}
+	return undef unless $line =~ m/^$LINES/;
+	return $self->_decode_line($line);
+}
+
+sub get_subset {
+	my ($self, $fh, $offset, $length, $out_file) = @_;
+	my $in_fh = 1;
+	if (ref $fh ne 'GLOB') {
+		my $file = $fh;
+		open my $ffh, '<', $file or die "cannot open file: $!";
+		$fh = $ffh;
+		$in_fh = 0;
+	}
+	seek $fh, 0, 0;
+	if ($offset) {
+		<$fh> for ( 1 .. $offset );
+	}
+	my @lines;
+	my $line = '';
+	while ($offset <= $length) {
+		do { $offset++; $line .= <$fh> } 
+			while ($line !~ m/^$LINES/ && !eof($fh) && $offset <= $length);
+		if ($line =~ m/^$LINES/) {
+			push @lines, $line;
+			$line = "";
+		}
+	}
+	if (!$in_fh) {
+		close $fh;
+	}
+	if ($out_file) {
+		open my $cfh, '>', $out_file or die "cannot open file for writing: $!";
+		print $cfh join "", @lines;
+		close $cfh;
+		return 1;
+	}
+	return [
+		map {
+			$self->_decode_line($_);
+		} @lines
+	];
+}
+
+sub group_lines {
+	my ($self, $fh, $key) = @_;
+	die "Key must be provided for grouping" unless defined $key;
+	seek $fh, 0, 0;
+	my (%groups, $line_num, $line);
+	($line_num, $line) = (0, '');
+	while (!eof($fh)) {
+		my $start_line = $line_num;
+		while ($line !~ m/^$LINES/ && !eof($fh)) {
+			$line .= <$fh>;
+			$line_num++;
+		}
+		last unless $line =~ m/^$LINES/;
+		my $data = $self->_decode_line($line);
+		$line = '';
+		my $value = ref $key eq 'CODE'
+			? do { local $_ = $data; $key->($data) }
+			: $data->{$key};
+		push @{ $groups{$value} }, $start_line;
+	}
+	return \%groups;
+}
+
 sub _decode_line {
 	my ($self, $line) = @_;
 	my $struct = eval { $JSON->decode($line) };
@@ -189,7 +320,7 @@ JSON::Lines - Parse JSONLines with perl.
 
 =head1 VERSION
 
-Version 1.08
+Version 1.10
 
 =cut
 
@@ -325,6 +456,18 @@ Pretty print.
 
 Parse the first line of the stream as headers.
 
+All of the above options can also be get/set dynamically via accessor methods:
+
+	# Get current value
+	my $is_pretty = $jsonl->pretty;
+
+	# Set value (returns $self for chaining)
+	$jsonl->pretty(1)->canonical(1);
+
+	# Set callbacks
+	$jsonl->error_cb(sub { warn "Error: $_[1]" });
+	$jsonl->success_cb(sub { print "Processed: $_[1]" });
+
 =head2 encode
 
 Encode a perl struct into a json lines string.
@@ -378,6 +521,37 @@ Decode a json lines file, 'n' lines at a time.
 Clear the current JSON::Lines stream.
 
 	$jsonl->clear_stream;
+
+=head2 get_subset
+
+Get a subset of JSON lines, optionally pass a file to write to.
+
+	my $lines = $jsonl->get_subset($file, $offset, $length);
+
+	$jsonl->get_subset($file, $offset, $length, $out_file);
+
+=head2 get_line_at
+
+Get a single record at a specific 0-based line index.
+
+	my $record = $jsonl->get_line_at($fh, 5, 1);  # seek to beginning first
+	my $record = $jsonl->get_line_at($fh, 5);     # no seek, read from current position
+
+Returns undef if the index is beyond the end of the file. Works with indices returned by group_lines.
+
+=head2 group_lines
+
+Group lines in a JSONL file by a key value, returning a hash of line indices.
+
+	open my $fh, '<', $file or die $!;
+	my $groups = $jsonl->group_lines($fh, 'category');
+	# Returns: { 'cat1' => [0, 2, 4], 'cat2' => [1, 3] }
+
+	# With a coderef for complex grouping:
+	my $groups = $jsonl->group_lines($fh, sub { $_->{nested}{key} });
+	close $fh;
+
+The returned indices are 0-based and compatible with get_subset offsets.
 
 =head1 AUTHOR
 

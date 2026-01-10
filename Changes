@@ -13,3 +13,6 @@ Revision history for JSON-Lines
 
 1.08	2025/05/20
 	- Fix - get_line to return undef on end of file.
+
+1.10	2026/01/10
+	- Adds group_lines and get_line_at
