@@ -16,3 +16,9 @@ Revision history for JSON-Lines
 
 1.10	2026/01/10
 	- Adds group_lines and get_line_at
+
+1.11	2026/01/10
+	- Fix regex to be string-aware, correctly handling unbalanced braces within JSON string values
+	- Adds chunked/streaming input support with automatic buffering
+	- Adds remaining() method to check buffer state
+	- Adds clear_buffer() method to reset buffer between operations
