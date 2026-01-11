@@ -371,7 +371,7 @@ __END__
 
 =head1 NAME
 
-JSON::Lines - Parse JSONLines with perl.
+JSON::Lines - Parse or encode JSONLines using Perl.
 
 =head1 VERSION
 
@@ -487,11 +487,11 @@ Instantiate a new JSON::Lines object.
 
 =head3 success_cb
 
-Callback called on successfull encode or decode of an item.
+Callback called on successful encode or decode of an item.
 
 =head3 error_cb
 
-Callback called on unsucessfull encode or decode of an item.
+Callback called on unsuccessful encode or decode of an item.
 
 =head3 canonical
 
@@ -523,19 +523,19 @@ All of the above options can also be get/set dynamically via accessor methods:
 
 =head2 encode
 
-Encode a perl struct into a json lines string.
+Encode a Perl structure into a JSON Lines string.
 
 	$jsonl->encode( $data );
 
 =head2 encode_file
 
-Encode a perl struct into a json lines file.
+Encode a Perl structure into a JSON Lines file.
 
 	$jsonl->encode_file($file, $data);
 
 =head2 decode
 
-Decode a json lines string into a perl struct. Handles multiple JSON objects
+Decode a JSON Lines string into a Perl structure. Handles multiple JSON objects
 per line (e.g., from streaming output that concatenates objects without newlines).
 The decoder is string-aware, correctly handling unbalanced braces within JSON
 string values (e.g., code snippets containing C<{> or C<}>).
